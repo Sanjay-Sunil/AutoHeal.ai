@@ -1,4 +1,10 @@
+import sys
 import httpx
+import aegis_agent
+
+# Avoid unicode encode errors on Windows
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
 
 def checkout():
     """
@@ -29,14 +35,18 @@ def checkout():
         # THE TRAP: We catch the HTTP error instead of letting the app crash!
         if e.response.status_code == 400:
             error_details = e.response.json().get('detail', e.response.text)
-            print(f"\n[Product Backend] 🚨 CAUGHT 400 ERROR from Vendor!")
+            print("\n[Product Backend] CAUGHT 400 ERROR from Vendor!")
             print(f"Error Message: {error_details}")
             
-            # Here is where we will eventually call our Aegis Agent
-            print("\n[Product Backend] 🛡️ Delegating payload and error to Aegis Remediation API...")
-            
-            # For now, we just return a placeholder so the app doesn't crash
-            return {"status": "delegated_to_aegis"}
+            # Delegate to Aegis Agent
+            print("\n[Product Backend] Delegating payload and error to Aegis Remediation Agent...")
+            try:
+                healed_response = aegis_agent.heal_and_retry(old_cart_payload, error_details, target_url)
+                print(f"[Product Backend] Order placed successfully after self-healing: {healed_response}")
+                return healed_response
+            except Exception as healing_err:
+                print(f"[Product Backend] Aegis Remediation failed: {healing_err}")
+                return {"status": "failed", "reason": str(healing_err)}
         else:
             # If it's a 500 server down error, we can't heal that.
             print(f"[Product Backend] Fatal error {e.response.status_code}")

@@ -1,5 +1,10 @@
 from fastapi import FastAPI, HTTPException, Request
 import uvicorn
+import sys
+
+# Avoid unicode encode errors on Windows
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
 
 app = FastAPI()
 
@@ -13,17 +18,18 @@ async def process_payment(request: Request):
     print(f"[Vendor API] Received payload: {payload}")
 
     # The new strict schema requirement! 
-    # It now expects {"transaction": {"total_amount": 100}}
-    if "transaction" not in payload or "total_amount" not in payload.get("transaction", {}):
+    # It now expects {"transaction": {"total_amount": 100, "user_uuid": "..."}}
+    transaction = payload.get("transaction", {})
+    if not isinstance(payload, dict) or "transaction" not in payload or not isinstance(transaction, dict) or "total_amount" not in transaction or "user_uuid" not in transaction:
         error_msg = (
             "Schema Validation Failed: 'amount' and 'user_id' at the root level "
             "are deprecated. You must pass a nested 'transaction' object containing "
             "'total_amount' and 'user_uuid'."
         )
-        print(f"[Vendor API] ❌ Rejecting request with 400. Reason: {error_msg}")
+        print(f"[Vendor API] Rejecting request with 400. Reason: {error_msg}")
         raise HTTPException(status_code=400, detail=error_msg)
 
-    print("[Vendor API] ✅ Payment Processed Successfully!")
+    print("[Vendor API] Payment Processed Successfully!")
     return {"status": "success", "transaction_id": "txn_987654321"}
 
 if __name__ == "__main__":
