@@ -1,9 +1,12 @@
+import os
 import json
 import asyncio
 import sys
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from github import Github, GithubException
 
 # Import the LangGraph builder from the agent file you just tested
 from aegis_agent import build_aegis_graph
@@ -143,4 +146,4 @@ async def approve_and_create_pr(request: PRRequest):
 if __name__ == "__main__":
     import uvicorn
     print("Starting Aegis Dashboard Server on port 8000...")
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    uvicorn.run(app, host="127.0.0.1", port=8003)
