@@ -19,7 +19,7 @@ def checkout():
         "amount": 99.00
     }
     
-    target_url = "http://127.0.0.1:8001/pay"
+    target_url = "http://127.0.0.1:8000/pay"
 
     try:
         # We attempt the HTTP request to the vendor

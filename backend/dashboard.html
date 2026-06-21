@@ -4,103 +4,118 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Aegis | Autonomous API Remediation</title>
-  <!-- Tailwind CSS -->
+  <title>AutoHeal.ai | Autonomous API Remediation</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- React & ReactDOM -->
   <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-  <!-- Babel for JSX (Pinned stable version) -->
   <script src="https://unpkg.com/@babel/standalone@7.23.6/babel.min.js"></script>
-  <!-- PrismJS for Code Highlighting -->
   <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-json.min.js"></script>
 
   <style>
-    body {
-      background-color: #0f172a;
-      color: #f8fafc;
-      font-family: 'Inter', sans-serif;
-    }
-
-    .log-enter {
-      animation: fadeIn 0.4s ease-out forwards;
-    }
-
-    @keyframes fadeIn {
-      from {
-        opacity: 0;
-        transform: translateY(10px);
-      }
-
-      to {
-        opacity: 1;
-        transform: translateY(0);
-      }
-    }
-
-    /* Custom scrollbar for terminal */
-    ::-webkit-scrollbar {
-      width: 8px;
-      height: 8px;
-    }
-
-    ::-webkit-scrollbar-track {
-      background: #1e293b;
-    }
-
-    ::-webkit-scrollbar-thumb {
-      background: #475569;
-      border-radius: 4px;
-    }
-
-    ::-webkit-scrollbar-thumb:hover {
-      background: #64748b;
-    }
+    body { background-color: #0f172a; color: #f8fafc; font-family: 'Inter', sans-serif; }
+    .log-enter { animation: fadeIn 0.4s ease-out forwards; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes pulse-glow { 0%, 100% { box-shadow: 0 0 8px rgba(99,102,241,0.4); } 50% { box-shadow: 0 0 20px rgba(99,102,241,0.8); } }
+    .pulse-glow { animation: pulse-glow 2s ease-in-out infinite; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #1e293b; }
+    ::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+    .diff-added { background: rgba(34,197,94,0.1); border-left: 3px solid #22c55e; }
+    .diff-removed { background: rgba(239,68,68,0.1); border-left: 3px solid #ef4444; }
   </style>
 </head>
 
-<body className="h-screen flex flex-col overflow-hidden">
-  <div id="root" className="h-full"></div>
+<body class="h-screen flex flex-col overflow-hidden">
+  <div id="root" class="h-full"></div>
 
   <script type="text/babel" data-presets="react">
     const { useState, useEffect, useRef } = React;
 
+    // ── Diff Pane Component ──
+    function DiffPane({ title, leftLabel, rightLabel, leftContent, rightContent, language }) {
+      const leftRef = useRef(null);
+      const rightRef = useRef(null);
+
+      useEffect(() => {
+        if (window.Prism) Prism.highlightAll();
+      }, [leftContent, rightContent]);
+
+      if (!leftContent && !rightContent) return null;
+
+      return (
+        <div className="flex flex-col h-full">
+          <div className="flex border-b border-slate-700">
+            <div className="flex-1 px-3 py-1.5 text-xs font-mono text-red-400 bg-red-950/30 border-r border-slate-700 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-red-500 inline-block"></span>{leftLabel}
+            </div>
+            <div className="flex-1 px-3 py-1.5 text-xs font-mono text-emerald-400 bg-emerald-950/30 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>{rightLabel}
+            </div>
+          </div>
+          <div className="flex flex-1 overflow-hidden">
+            <div ref={leftRef} className="flex-1 overflow-auto border-r border-slate-700 p-3">
+              <pre className="!m-0 !bg-transparent text-xs"><code className={`language-${language}`}>{leftContent || '// No data'}</code></pre>
+            </div>
+            <div ref={rightRef} className="flex-1 overflow-auto p-3">
+              <pre className="!m-0 !bg-transparent text-xs"><code className={`language-${language}`}>{rightContent || '// No data'}</code></pre>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ── Main App ──
     function App() {
       const [logs, setLogs] = useState([]);
-      const [code, setCode] = useState("");
-      const [healedPayload, setHealedPayload] = useState(null);
       const [isProcessing, setIsProcessing] = useState(false);
-      const [status, setStatus] = useState("idle"); // idle, error, healing, success
+      const [status, setStatus] = useState("idle");
 
-      // New states for GitOps PR integration
+      // Diff data
+      const [oldSchema, setOldSchema] = useState("");
+      const [newSchema, setNewSchema] = useState("");
+      const [oldCode, setOldCode] = useState("");
+      const [newCode, setNewCode] = useState("");
+      const [sourceFile, setSourceFile] = useState("");
+      const [healedPayload, setHealedPayload] = useState(null);
+
+      // Diff tab
+      const [diffTab, setDiffTab] = useState("schema");
+
+      // PR state
       const [isMerging, setIsMerging] = useState(false);
       const [mergeStatus, setMergeStatus] = useState(null);
 
+      // Incident history
+      const [incidents, setIncidents] = useState([]);
+      const [showHistory, setShowHistory] = useState(false);
+
       const terminalRef = useRef(null);
 
-      // Auto-scroll terminal
       useEffect(() => {
-        if (terminalRef.current) {
-          terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
-        }
+        if (terminalRef.current) terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
       }, [logs]);
 
-      // Highlight code when it updates
       useEffect(() => {
-        if (code && window.Prism) {
-          Prism.highlightAll();
-        }
-      }, [code]);
+        if (window.Prism) Prism.highlightAll();
+      }, [oldCode, newCode, oldSchema, newSchema, diffTab]);
+
+      const fetchIncidents = async () => {
+        try {
+          const res = await fetch('/api/incidents');
+          const data = await res.json();
+          setIncidents(data);
+        } catch(e) { console.error(e); }
+      };
 
       const triggerCheckout = () => {
-        setLogs([]);
-        setCode("");
-        setHealedPayload(null);
-        setMergeStatus(null); // Reset PR status on new run
-        setIsProcessing(true);
-        setStatus("idle");
+        setLogs([]); setOldSchema(""); setNewSchema("");
+        setOldCode(""); setNewCode(""); setSourceFile("");
+        setHealedPayload(null); setMergeStatus(null);
+        setIsProcessing(true); setStatus("idle");
 
         const eventSource = new EventSource('/api/checkout-stream');
 
@@ -111,6 +126,7 @@
             setIsProcessing(false);
             setStatus("success");
             eventSource.close();
+            fetchIncidents();
             return;
           }
 
@@ -118,37 +134,37 @@
 
           if (data.step === 'error') setStatus("error");
           if (data.step === 'aegis_init') setStatus("healing");
-          if (data.code) setCode(data.code);
+          if (data.old_schema) setOldSchema(data.old_schema);
+          if (data.new_schema) setNewSchema(data.new_schema);
+          if (data.old_code) setOldCode(data.old_code);
+          if (data.new_code) setNewCode(data.new_code);
+          if (data.source_file) setSourceFile(data.source_file);
           if (data.healed_payload) setHealedPayload(data.healed_payload);
         };
 
-        eventSource.onerror = () => {
-          setIsProcessing(false);
-          eventSource.close();
-        };
+        eventSource.onerror = () => { setIsProcessing(false); eventSource.close(); };
       };
 
-      // Handler for the GitOps approval
       const handleMergePR = async () => {
         setIsMerging(true);
         try {
           const response = await fetch('/api/approve-pr', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ code: code })
+            body: JSON.stringify({
+              code: newCode,
+              source_file: sourceFile || "integrations/stripe_integration.py"
+            })
           });
-
           const data = await response.json();
           if (response.ok) {
-            setMergeStatus({ type: 'success', text: 'PR Opened successfully!', url: data.pr_url });
+            setMergeStatus({ type: 'success', text: 'PR opened successfully!', url: data.pr_url });
           } else {
-            setMergeStatus({ type: 'error', text: 'Failed to create PR.' });
+            setMergeStatus({ type: 'error', text: data.message || 'Failed to create PR.' });
           }
         } catch (error) {
           setMergeStatus({ type: 'error', text: 'Server error. Is the backend running?' });
-        } finally {
-          setIsMerging(false);
-        }
+        } finally { setIsMerging(false); }
       };
 
       const getStatusColor = () => {
@@ -158,99 +174,161 @@
         return "text-slate-400 border-slate-700 bg-slate-800";
       };
 
+      const hasDiffs = oldSchema || newSchema || oldCode || newCode;
+
       return (
         <div className="h-full flex flex-col">
           {/* Header */}
-          <header className="border-b border-slate-800 bg-slate-900 px-6 py-4 flex justify-between items-center">
+          <header className="border-b border-slate-800 bg-slate-900 px-6 py-3 flex justify-between items-center">
             <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded bg-indigo-500 flex items-center justify-center font-bold text-white shadow-[0_0_15px_rgba(99,102,241,0.5)]">Æ</div>
-              <h1 className="text-xl font-bold tracking-tight">Aegis Control Plane</h1>
+              <div className="w-8 h-8 rounded bg-indigo-500 flex items-center justify-center font-bold text-white text-sm shadow-[0_0_15px_rgba(99,102,241,0.5)]">A</div>
+              <h1 className="text-lg font-bold tracking-tight">AutoHeal.ai Control Plane</h1>
+              <span className="text-xs text-slate-500 font-mono ml-2">v2.0</span>
             </div>
-            <div className={`px-4 py-1.5 rounded-full border text-sm font-medium transition-colors ${getStatusColor()}`}>
-              {status === "idle" && "System Standby"}
-              {status === "error" && "Schema Drift Detected"}
-              {status === "healing" && "Agentic Loop Active"}
-              {status === "success" && "Pipeline Restored"}
+            <div className="flex items-center gap-3">
+              <button onClick={() => { setShowHistory(!showHistory); if(!showHistory) fetchIncidents(); }}
+                className="text-xs text-slate-400 hover:text-white border border-slate-700 hover:border-slate-500 px-3 py-1.5 rounded transition-colors">
+                {showHistory ? 'Hide' : 'Show'} Incident Log
+              </button>
+              <div className={`px-4 py-1.5 rounded-full border text-xs font-medium transition-colors ${getStatusColor()}`}>
+                {status === "idle" && "System Standby"}
+                {status === "error" && "Schema Drift Detected"}
+                {status === "healing" && "Agentic Loop Active"}
+                {status === "success" && "Pipeline Restored"}
+              </div>
             </div>
           </header>
 
           <div className="flex-1 flex overflow-hidden">
             {/* Left Panel: App Simulator */}
-            <div className="w-1/3 border-r border-slate-800 p-6 flex flex-col bg-slate-900/50">
-              <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-6">Consumer App Simulator</h2>
+            <div className="w-[280px] border-r border-slate-800 p-4 flex flex-col bg-slate-900/50">
+              <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4">Consumer App</h2>
 
-              <div className="bg-slate-800 rounded-xl p-6 border border-slate-700 flex-1 flex flex-col justify-center shadow-xl">
-                <div className="text-center mb-8">
-                  <div className="inline-block p-4 bg-slate-700 rounded-full mb-4">
-                    <svg className="w-8 h-8 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+              <div className="bg-slate-800 rounded-xl p-5 border border-slate-700 flex-1 flex flex-col justify-center shadow-xl">
+                <div className="text-center mb-6">
+                  <div className="inline-block p-3 bg-slate-700 rounded-full mb-3">
+                    <svg className="w-6 h-6 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
                   </div>
-                  <h3 className="text-2xl font-bold mb-2">Premium Widget</h3>
-                  <p className="text-slate-400">$99.00 USD</p>
+                  <h3 className="text-lg font-bold mb-1">Premium Widget</h3>
+                  <p className="text-slate-400 text-sm">$99.00 USD</p>
                 </div>
 
-                <button
-                  onClick={triggerCheckout}
-                  disabled={isProcessing}
-                  className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-600 text-white font-semibold py-4 rounded-lg transition-all transform active:scale-95 shadow-[0_0_20px_rgba(99,102,241,0.3)] disabled:shadow-none flex items-center justify-center gap-2"
-                >
+                <button onClick={triggerCheckout} disabled={isProcessing}
+                  className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-600 text-white font-semibold py-3 rounded-lg transition-all transform active:scale-95 shadow-[0_0_20px_rgba(99,102,241,0.3)] disabled:shadow-none flex items-center justify-center gap-2 text-sm">
                   {isProcessing ? (
-                    <><svg className="animate-spin h-5 w-5 text-white" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Processing...</>
-                  ) : (
-                    "Checkout & Pay"
-                  )}
+                    <><svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Processing...</>
+                  ) : ("Checkout & Pay")}
                 </button>
               </div>
+
+              {/* Healed Payload Display */}
+              {healedPayload && (
+                <div className="mt-4 bg-emerald-950/30 border border-emerald-800 rounded-lg p-3 log-enter">
+                  <p className="text-xs text-emerald-400 font-semibold mb-1">Healed Payload</p>
+                  <pre className="text-xs text-emerald-300 font-mono overflow-auto">{JSON.stringify(healedPayload, null, 2)}</pre>
+                </div>
+              )}
             </div>
 
-            {/* Right Panel: Aegis Telemetry */}
-            <div className="w-2/3 flex flex-col p-6 gap-6 overflow-hidden">
-
-              {/* Live Terminal */}
-              <div className="flex-1 flex flex-col border border-slate-700 rounded-xl bg-slate-950 shadow-2xl overflow-hidden">
-                <div className="bg-slate-800/80 px-4 py-2 border-b border-slate-700 flex items-center gap-2">
-                  <div className="w-3 h-3 rounded-full bg-red-500"></div>
-                  <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
-                  <div className="w-3 h-3 rounded-full bg-green-500"></div>
-                  <span className="ml-2 text-xs font-mono text-slate-400">langgraph-agent.log</span>
+            {/* Right Panel: Telemetry + Diffs */}
+            <div className="flex-1 flex flex-col overflow-hidden">
+              {/* Terminal */}
+              <div className={`${hasDiffs ? 'h-[45%]' : 'flex-1'} flex flex-col border-b border-slate-700 bg-slate-950 overflow-hidden`}>
+                <div className="bg-slate-800/80 px-4 py-1.5 border-b border-slate-700 flex items-center gap-2">
+                  <div className="w-2.5 h-2.5 rounded-full bg-red-500"></div>
+                  <div className="w-2.5 h-2.5 rounded-full bg-yellow-500"></div>
+                  <div className="w-2.5 h-2.5 rounded-full bg-green-500"></div>
+                  <span className="ml-2 text-xs font-mono text-slate-500">autoheal-agent.log</span>
                 </div>
-                <div ref={terminalRef} className="flex-1 p-4 overflow-y-auto font-mono text-sm leading-relaxed space-y-3">
+                <div ref={terminalRef} className="flex-1 p-3 overflow-y-auto font-mono text-xs leading-relaxed space-y-2">
                   {logs.length === 0 && <p className="text-slate-600 italic">Waiting for telemetry...</p>}
                   {logs.map((log, i) => (
-                    <div key={i} className={`log-enter ${log.step.includes('error') ? 'text-red-400' : log.step.includes('success') ? 'text-emerald-400' : 'text-slate-300'}`}>
-                      <span className="text-slate-500 mr-3">[{new Date().toLocaleTimeString()}]</span>
+                    <div key={i} className={`log-enter ${log.step.includes('error') ? 'text-red-400' : log.step.includes('success') ? 'text-emerald-400' : log.step.includes('tool') ? 'text-violet-400' : 'text-slate-300'}`}>
+                      <span className="text-slate-600 mr-2">[{new Date().toLocaleTimeString()}]</span>
                       {log.msg}
                     </div>
                   ))}
                 </div>
               </div>
 
-              {/* Code Diff Viewer */}
-              {code && (
-                <div className="h-64 border border-slate-700 rounded-xl bg-slate-900 shadow-2xl overflow-hidden flex flex-col log-enter">
-                  <div className="bg-slate-800/80 px-4 py-2 border-b border-slate-700 flex justify-between items-center">
-                    <span className="text-xs font-mono text-amber-400">Auto-Generated PR Diff: integrators/stripe.py</span>
-                    <div className="flex items-center gap-3">
+              {/* Diff Viewer */}
+              {hasDiffs && (
+                <div className="h-[55%] flex flex-col bg-slate-900 overflow-hidden log-enter">
+                  {/* Diff Tab Bar */}
+                  <div className="bg-slate-800/80 px-4 py-1.5 border-b border-slate-700 flex justify-between items-center">
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => setDiffTab("schema")}
+                        className={`px-3 py-1 rounded text-xs font-medium transition-colors ${diffTab === 'schema' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>
+                        Schema Diff
+                      </button>
+                      <button onClick={() => setDiffTab("code")}
+                        className={`px-3 py-1 rounded text-xs font-medium transition-colors ${diffTab === 'code' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>
+                        Code Diff
+                      </button>
+                      {sourceFile && <span className="ml-3 text-xs font-mono text-slate-500">Target: {sourceFile}</span>}
+                    </div>
+                    <div className="flex items-center gap-2">
                       {mergeStatus && (
                         <span className={`text-xs ${mergeStatus.type === 'error' ? 'text-red-400' : 'text-emerald-400'}`}>
-                          {mergeStatus.text} {mergeStatus.url && <a href={mergeStatus.url} target="_blank" className="underline ml-1">View PR ↗</a>}
+                          {mergeStatus.text} {mergeStatus.url && <a href={mergeStatus.url} target="_blank" className="underline ml-1">View PR</a>}
                         </span>
                       )}
-                      <button
-                        onClick={handleMergePR}
-                        disabled={isMerging || mergeStatus?.type === 'success'}
-                        className="bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-600 disabled:cursor-not-allowed text-white text-xs px-3 py-1 rounded transition-colors flex items-center gap-2"
-                      >
-                        {isMerging ? 'Pushing to GitHub...' : 'Approve & Merge PR'}
+                      <button onClick={handleMergePR}
+                        disabled={isMerging || !newCode || mergeStatus?.type === 'success'}
+                        className="bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:cursor-not-allowed text-white text-xs px-3 py-1 rounded transition-colors">
+                        {isMerging ? 'Pushing...' : 'Approve & Open PR'}
                       </button>
                     </div>
                   </div>
-                  <div className="flex-1 overflow-auto p-0">
-                    <pre className="!m-0 !bg-transparent !p-4 h-full text-sm"><code className="language-python">{code}</code></pre>
+
+                  {/* Diff Content */}
+                  <div className="flex-1 overflow-hidden">
+                    {diffTab === "schema" && (
+                      <DiffPane
+                        leftLabel="Old Schema (Deprecated)"
+                        rightLabel="New Schema (Required)"
+                        leftContent={oldSchema}
+                        rightContent={newSchema}
+                        language="json"
+                      />
+                    )}
+                    {diffTab === "code" && (
+                      <DiffPane
+                        leftLabel="Old Code (format_payload)"
+                        rightLabel="New Code (transform_payload)"
+                        leftContent={oldCode}
+                        rightContent={newCode}
+                        language="python"
+                      />
+                    )}
                   </div>
                 </div>
               )}
-
             </div>
+
+            {/* Incident History Sidebar */}
+            {showHistory && (
+              <div className="w-[300px] border-l border-slate-800 bg-slate-900/80 flex flex-col overflow-hidden log-enter">
+                <div className="px-4 py-3 border-b border-slate-700">
+                  <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Incident History</h2>
+                </div>
+                <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                  {incidents.length === 0 && <p className="text-xs text-slate-600 italic">No incidents recorded yet.</p>}
+                  {incidents.map((inc, i) => (
+                    <div key={inc.id} className={`p-3 rounded-lg border text-xs ${inc.status === 'healed' ? 'border-emerald-800 bg-emerald-950/20' : inc.status === 'failed' ? 'border-red-800 bg-red-950/20' : 'border-slate-700 bg-slate-800/50'}`}>
+                      <div className="flex justify-between items-center mb-1">
+                        <span className="font-semibold text-slate-300">Incident #{inc.id}</span>
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${inc.status === 'healed' ? 'bg-emerald-900 text-emerald-400' : inc.status === 'failed' ? 'bg-red-900 text-red-400' : 'bg-amber-900 text-amber-400'}`}>
+                          {inc.status}
+                        </span>
+                      </div>
+                      <p className="text-slate-500 truncate">{inc.error_message}</p>
+                      <p className="text-slate-600 mt-1">{inc.created_at}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       );
